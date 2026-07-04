@@ -39,7 +39,7 @@ targets:
         DEVELOPMENT_TEAM: YYVT547SZ7
         ENABLE_HARDENED_RUNTIME: NO
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: 2
+        CURRENT_PROJECT_VERSION: 3
       configs:
         Release:
           CODE_SIGN_IDENTITY: "Developer ID Application"
