@@ -76,6 +76,9 @@ cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 DMG="build/dist/Snapcat-$VERSION.dmg"
 hdiutil create -volname Snapcat -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+# Signing the DMG itself is optional for Gatekeeper but makes every spctl
+# check mode pass cleanly.
+codesign -f --timestamp -s "$IDENTITY" "$DMG"
 xcrun notarytool submit "$DMG" --keychain-profile snapcat-notary --wait \
     || die "DMG notarization failed"
 xcrun stapler staple "$DMG" || die "stapling the DMG failed"
