@@ -39,10 +39,13 @@ targets:
         DEVELOPMENT_TEAM: YYVT547SZ7
         ENABLE_HARDENED_RUNTIME: NO
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: 2
       configs:
         Release:
           CODE_SIGN_IDENTITY: "Developer ID Application"
           ENABLE_HARDENED_RUNTIME: YES
           OTHER_CODE_SIGN_FLAGS: "--timestamp"
           DEAD_CODE_STRIPPING: YES
+          # Plain `xcodebuild build` injects the debug-only get-task-allow
+          # entitlement even in Release; notarization rejects it.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO

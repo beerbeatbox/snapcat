@@ -41,6 +41,19 @@ xcodebuild -project Snapcat.xcodeproj -scheme Snapcat -configuration Release \
 APP="build/dd/Build/Products/Release/Snapcat.app"
 [[ -d "$APP" ]] || die "Release app not found at $APP"
 
+# ---------- 3b. Re-sign Sparkle's nested helpers ----------
+# xcodebuild signs the framework shell only; the nested Updater.app/Autoupdate/
+# XPC services keep Sparkle's own signature, which notarization rejects.
+# Sign inside-out, then rebuild the framework and app seals.
+IDENTITY="Developer ID Application"
+FW="$APP/Contents/Frameworks/Sparkle.framework"
+codesign -f -o runtime --timestamp -s "$IDENTITY" "$FW/Versions/B/XPCServices/Installer.xpc"
+codesign -f -o runtime --timestamp --preserve-metadata=entitlements -s "$IDENTITY" "$FW/Versions/B/XPCServices/Downloader.xpc"
+codesign -f -o runtime --timestamp -s "$IDENTITY" "$FW/Versions/B/Autoupdate"
+codesign -f -o runtime --timestamp -s "$IDENTITY" "$FW/Versions/B/Updater.app"
+codesign -f -o runtime --timestamp -s "$IDENTITY" "$FW"
+codesign -f -o runtime --timestamp -s "$IDENTITY" "$APP"
+
 # ---------- 4. Verify signature ----------
 codesign --verify --deep --strict "$APP" || die "codesign verification failed"
 
