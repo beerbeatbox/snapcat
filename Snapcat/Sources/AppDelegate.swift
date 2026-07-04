@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 
 @main
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -12,6 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var statusItem: NSStatusItem?
+
+    private let updaterController = SPUStandardUpdaterController(startingUpdater: true,
+                                                                 updaterDelegate: nil,
+                                                                 userDriverDelegate: nil)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -49,6 +54,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   keyEquivalent: "")
         editLast.target = self
         menu.addItem(editLast)
+
+        menu.addItem(.separator())
+
+        let checkForUpdates = NSMenuItem(title: "Check for Updates…",
+                                         action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+                                         keyEquivalent: "")
+        checkForUpdates.target = updaterController
+        menu.addItem(checkForUpdates)
 
         menu.addItem(.separator())
 

@@ -3,3 +3,5 @@ DerivedData/
 xcuserdata/
 *.xcodeproj
 .DS_Store
+sparkle_priv.pem
+tools/
