@@ -44,6 +44,10 @@ final class PreviewPanelController {
                             defer: false)
         panel.isFloatingPanel = true
         panel.level = .statusBar
+        // The card backdrop is always dark (blurred capture + black scrim), so
+        // pin dark appearance — otherwise Light-mode users get dark button
+        // labels on a dark card and the controls vanish.
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
@@ -151,7 +155,7 @@ struct PreviewCard: View {
                 .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
 
             if hovering {
-                Color.black.opacity(0.28)
+                Color.black.opacity(0.5)
                     .transition(.opacity)
 
                 HStack(spacing: 8) {
@@ -162,8 +166,13 @@ struct PreviewCard: View {
                         Label(saved ? "Saved ✓" : "Save",
                               systemImage: saved ? "checkmark" : "square.and.arrow.down")
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(saved)
+                    // Opaque fill instead of .bordered's translucent material,
+                    // which let the capture bleed through and swallow the button.
+                    .buttonStyle(.borderedProminent)
+                    .tint(saved ? Color.green.opacity(0.85) : Color(white: 0.3))
+                    // Block re-saves without .disabled's fade, so "Saved ✓"
+                    // stays readable during its 0.9s farewell.
+                    .allowsHitTesting(!saved)
 
                     Button(action: onEdit) {
                         Label("Edit", systemImage: "pencil.tip.crop.circle")
