@@ -61,6 +61,46 @@ xcodebuild -project Snapcat.xcodeproj -scheme Snapcat -configuration Debug build
 
 ## Release (สำหรับผู้ดูแล)
 
+ออกรีลีสได้สองทาง: ผ่าน GitHub Actions (แนะนำ — สั่งจากที่ไหนก็ได้ รวมถึงให้
+Claude Code สั่งหลังแก้โค้ดเสร็จ) หรือรันสคริปต์บนเครื่องตัวเอง
+
+### ทางที่ 1 — GitHub Actions
+
+```bash
+gh workflow run release.yml -f version=0.2.0
+gh run watch   # ดูสถานะ (ใช้เวลาราว 10-15 นาที รวม notarize)
+```
+
+หรือกด **Run workflow** ในแท็บ Actions บน GitHub ก็ได้
+workflow จะ bump เวอร์ชัน, build + sign + notarize + staple, สร้าง zip/DMG,
+generate `appcast.xml`, commit กลับขึ้น main แล้วสร้าง GitHub release ให้ครบ
+
+ต้องตั้ง repo secrets ครั้งเดียวก่อนใช้ (Settings → Secrets → Actions):
+
+| Secret | ค่า |
+|---|---|
+| `DEVELOPER_ID_P12` | ไฟล์ .p12 ของ cert "Developer ID Application" (export จาก Keychain) เข้ารหัส base64 |
+| `DEVELOPER_ID_P12_PASSWORD` | รหัสที่ตั้งตอน export .p12 |
+| `APPLE_ID` | อีเมล Apple ID |
+| `APPLE_APP_PASSWORD` | app-specific password (สร้างที่ account.apple.com) |
+| `SPARKLE_ED_PRIVATE_KEY` | เนื้อไฟล์ `sparkle_priv.pem` (คีย์เซ็น appcast) |
+
+```bash
+# export cert + private key จาก login keychain แล้วอัปเป็น secrets
+security export -k login.keychain -t identities -f pkcs12 -o /tmp/certs.p12 -P '<ตั้งรหัส>'
+base64 -i /tmp/certs.p12 | gh secret set DEVELOPER_ID_P12
+rm /tmp/certs.p12
+gh secret set DEVELOPER_ID_P12_PASSWORD -b '<รหัสเดียวกัน>'
+gh secret set APPLE_ID -b '<Apple ID>'
+gh secret set APPLE_APP_PASSWORD -b '<app-specific password>'
+gh secret set SPARKLE_ED_PRIVATE_KEY < sparkle_priv.pem
+```
+
+นอกจากนี้ทุกครั้งที่ push ขึ้น main จะมี workflow `ci.yml` build Debug
+(ไม่ sign) เพื่อเช็คว่าโค้ดยัง build ผ่าน
+
+### ทางที่ 2 — บนเครื่องตัวเอง
+
 ครั้งแรกต้องเก็บ credentials สำหรับ notarize ไว้ใน keychain ก่อน (ทำครั้งเดียว):
 
 ```bash

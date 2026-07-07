@@ -1,0 +1,163 @@
+# Snapcat release on CI: mirrors scripts/release.sh (build → sign → notarize →
+# staple → DMG → appcast → GitHub release) but runs on a GitHub macOS runner.
+#
+# Trigger:  gh workflow run release.yml -f version=0.2.0
+# Secrets:  DEVELOPER_ID_P12, DEVELOPER_ID_P12_PASSWORD, APPLE_ID,
+#           APPLE_APP_PASSWORD, SPARKLE_ED_PRIVATE_KEY  (see README)
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Marketing version, e.g. 0.2.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      VERSION: ${{ inputs.version }}
+      TEAM_ID: YYVT547SZ7
+      APP: build/dd/Build/Products/Release/Snapcat.app
+      IDENTITY: Developer ID Application
+    steps:
+      - name: Validate version
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::version must look like 0.2.0, got '$VERSION'"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: Fail if the tag already exists
+        run: |
+          if git ls-remote --exit-code origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "::error::tag v$VERSION already exists"; exit 1
+          fi
+
+      - name: Import Developer ID certificate into a temporary keychain
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          [[ -n "$DEVELOPER_ID_P12" ]] || { echo "::error::DEVELOPER_ID_P12 secret is not set"; exit 1; }
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN" | grep -q "$IDENTITY" \
+            || { echo "::error::no '$IDENTITY' identity found in the imported .p12"; exit 1; }
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Bump versions in project.yml
+        run: |
+          CURRENT_BUILD=$(sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION:[[:space:]]*//p' project.yml | head -1)
+          [[ -n "$CURRENT_BUILD" ]] || { echo "::error::CURRENT_PROJECT_VERSION not found in project.yml"; exit 1; }
+          NEW_BUILD=$((CURRENT_BUILD + 1))
+          sed -i '' "s/^\([[:space:]]*\)MARKETING_VERSION:.*/\1MARKETING_VERSION: \"$VERSION\"/" project.yml
+          sed -i '' "s/^\([[:space:]]*\)CURRENT_PROJECT_VERSION:.*/\1CURRENT_PROJECT_VERSION: $NEW_BUILD/" project.yml
+          echo "Snapcat $VERSION (build $NEW_BUILD)"
+
+      - name: Build (Release)
+        run: |
+          xcodegen generate
+          xcodebuild -project Snapcat.xcodeproj -scheme Snapcat -configuration Release \
+            -derivedDataPath build/dd build
+
+      - name: Re-sign Sparkle's nested helpers + the app
+        # xcodebuild signs the framework shell only; the nested Updater.app/
+        # Autoupdate/XPC services keep Sparkle's own signature, which
+        # notarization rejects. Sign inside-out, then reseal framework and app.
+        run: |
+          FW="$APP/Contents/Frameworks/Sparkle.framework"
+          codesign -f -o runtime --timestamp -s "$IDENTITY" "$FW/Versions/B/XPCServices/Installer.xpc"
+          codesign -f -o runtime --timestamp --preserve-metadata=entitlements -s "$IDENTITY" "$FW/Versions/B/XPCServices/Downloader.xpc"
+          codesign -f -o runtime --timestamp -s "$IDENTITY" "$FW/Versions/B/Autoupdate"
+          codesign -f -o runtime --timestamp -s "$IDENTITY" "$FW/Versions/B/Updater.app"
+          codesign -f -o runtime --timestamp -s "$IDENTITY" "$FW"
+          codesign -f -o runtime --timestamp -s "$IDENTITY" "$APP"
+          codesign --verify --deep --strict "$APP"
+
+      - name: Notarize + staple the app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          mkdir -p build/dist
+          ZIP="build/dist/Snapcat-$VERSION.zip"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          xcrun notarytool submit "$ZIP" --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" --team-id "$TEAM_ID" --wait
+          xcrun stapler staple "$APP"
+          # The distributed zip must contain the stapled ticket — rebuild it.
+          ditto -c -k --keepParent "$APP" "$ZIP"
+
+      - name: DMG — create, sign, notarize, staple
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          STAGE="$(mktemp -d)"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          DMG="build/dist/Snapcat-$VERSION.dmg"
+          # hdiutil occasionally hits "Resource busy" on CI runners — retry.
+          for i in 1 2 3; do
+            hdiutil create -volname Snapcat -srcfolder "$STAGE" -ov -format UDZO "$DMG" && break
+            [[ $i -lt 3 ]] || exit 1
+            sleep 5
+          done
+          codesign -f --timestamp -s "$IDENTITY" "$DMG"
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" --team-id "$TEAM_ID" --wait
+          xcrun stapler staple "$DMG"
+
+      - name: Generate the signed appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R sparkle-project/Sparkle -p 'Sparkle-2*.tar.xz' -D tools
+          tar -xf tools/Sparkle-2*.tar.xz -C tools
+          KEY_FILE="$RUNNER_TEMP/sparkle_priv.pem"
+          printf '%s\n' "$SPARKLE_ED_PRIVATE_KEY" > "$KEY_FILE"
+          mkdir -p build/appcast
+          cp -f "build/dist/Snapcat-$VERSION.zip" build/appcast/
+          ./tools/bin/generate_appcast --ed-key-file "$KEY_FILE" \
+            --download-url-prefix "https://github.com/beerbeatbox/snapcat/releases/download/v$VERSION/" \
+            -o appcast.xml build/appcast/
+          rm "$KEY_FILE"
+
+      - name: Commit the version bump + appcast to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add project.yml appcast.xml Snapcat/Info.plist
+          git commit -m "Release v$VERSION"
+          git push
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" \
+            "build/dist/Snapcat-$VERSION.zip" "build/dist/Snapcat-$VERSION.dmg" \
+            --title "Snapcat $VERSION" --generate-notes \
+            --target "$(git rev-parse HEAD)"
+          echo "Released: https://github.com/beerbeatbox/snapcat/releases/tag/v$VERSION"
