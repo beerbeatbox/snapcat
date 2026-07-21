@@ -323,10 +323,35 @@ struct EditorView: View {
                 RoundedRectangle(cornerRadius: 4)
                     .stroke(Color.accentColor, lineWidth: 1.5)
             )
+            // Handles live ON the editor so they track its frame exactly and
+            // draw ABOVE its border. Visual only (allowsHitTesting false) —
+            // grabs land on the interaction layer, where handleHit mirrors
+            // this frame via handleBox(of:scale:).
+            .overlay(alignment: .leading) { sideHandle.offset(x: -7) }
+            .overlay(alignment: .trailing) { sideHandle.offset(x: 7) }
+            .overlay(alignment: .bottomTrailing) { cornerHandle.offset(x: 3.5, y: 3.5) }
             // -3 cancels the padding, -5 the NSTextView line-fragment inset,
             // so glyphs land where the committed text will render.
             .offset(x: origin.x * scale - 3 - 5, y: origin.y * scale - 3)
             .onAppear { textFieldFocused = true }
+    }
+
+    /// Wrap-width handle (matches the canvas-drawn ones on committed text).
+    private var sideHandle: some View {
+        Circle()
+            .fill(Color.white)
+            .frame(width: 14, height: 14)
+            .overlay(Circle().fill(Color.accentColor).padding(2.5))
+            .allowsHitTesting(false)
+    }
+
+    /// Font-scale handle (bottom-right square).
+    private var cornerHandle: some View {
+        Rectangle()
+            .fill(Color.white)
+            .frame(width: 7, height: 7)
+            .overlay(Rectangle().stroke(Color.accentColor, lineWidth: 1))
+            .allowsHitTesting(false)
     }
 
     private func annotationCanvas(scale: CGFloat) -> some View {
@@ -387,19 +412,17 @@ struct EditorView: View {
 
             // Selection indicator — drawn after all annotations so it sits
             // on top. View-only; never rendered into the export. While a
-            // text is being typed the handles still show (so its abilities
-            // stay discoverable) but the dashed rect is skipped — the
-            // floating editor draws its own border.
+            // text is being typed this is skipped entirely: the floating
+            // editor draws its own border AND its own handles (as overlays,
+            // above its border — canvas-drawn ones would end up beneath it).
             if let selectedID = model.selectedID,
+               selectedID != model.editingTextID,
                let selected = model.annotations.first(where: { $0.id == selectedID }) {
-                let editing = selectedID == model.editingTextID
-                let bounds = model.displayBounds(of: selected)
-                let vr = scaledRect(bounds, scale: scale).insetBy(dx: -6, dy: -6)
-                if !editing {
-                    context.stroke(Path(roundedRect: vr, cornerRadius: 4),
-                                   with: .color(.accentColor),
-                                   style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                }
+                let vr = scaledRect(model.displayBounds(of: selected), scale: scale)
+                    .insetBy(dx: -6, dy: -6)
+                context.stroke(Path(roundedRect: vr, cornerRadius: 4),
+                               with: .color(.accentColor),
+                               style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
 
                 // Resize handles, drawn on top of the dashed indicator.
                 // Numbers stay move-only; text gets a single bottom-right

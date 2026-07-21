@@ -161,7 +161,7 @@ final class EditorViewModel: ObservableObject {
         case .text:
             // Bottom-right square scales the font; side circles set the
             // wrap width. Corner wins when the zones overlap (tiny text).
-            let rect = bounds(of: annotation)
+            let rect = handleBox(of: annotation, scale: scale)
             let radius = 10 / scale
             if hits(cornerPoint(.bottomRight, of: rect), radius: radius) {
                 return (annotation.id, annotation, .corner(.bottomRight))
@@ -250,8 +250,7 @@ final class EditorViewModel: ObservableObject {
 
     /// Bounds as currently SHOWN: while a text is being typed, the live
     /// buffer (plus caret room, matching the floating editor's frame) drives
-    /// the size — the committed string is stale until commit. Handles are
-    /// drawn and hit-tested against this so visuals and grabs agree.
+    /// the size — the committed string is stale until commit.
     func displayBounds(of annotation: Annotation) -> CGRect {
         guard annotation.id == editingTextID,
               case let .text(origin, _) = annotation.kind else {
@@ -261,6 +260,19 @@ final class EditorViewModel: ObservableObject {
                       size: textDisplaySize(editingBuffer + "M",
                                             fontSize: annotation.fontSize,
                                             wrapWidth: annotation.textWrapWidth))
+    }
+
+    /// The rect handles anchor to, in image px. While editing this mirrors
+    /// the floating editor's padded frame (view-space constants: 3pt padding
+    /// all around, extra 5pt NSTextView line-fragment inset on the left),
+    /// so drawn handles, their hit zones, and the visible border coincide.
+    func handleBox(of annotation: Annotation, scale: CGFloat) -> CGRect {
+        let rect = displayBounds(of: annotation)
+        guard annotation.id == editingTextID else { return rect }
+        return CGRect(x: rect.minX - 8 / scale,
+                      y: rect.minY - 3 / scale,
+                      width: rect.width + 6 / scale,
+                      height: rect.height + 6 / scale)
     }
 
     // MARK: - Interaction
