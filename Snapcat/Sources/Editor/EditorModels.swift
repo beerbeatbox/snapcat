@@ -50,6 +50,9 @@ struct Annotation: Identifiable {
     var color: Color        // ignored for .blur
     var blurLevel: Int = 3  // 1...10; meaningful only for .blur
     var fontSize: CGFloat = 30  // pt; meaningful only for .text
+    /// Wrap width in image px (.text only). nil = auto-size to content,
+    /// no wrapping; set by dragging the side handles.
+    var textWrapWidth: CGFloat?
 
     /// A copy of this annotation (same id) with its rect replaced.
     /// Returns self unchanged for `.number` and `.text` (belt-and-braces:

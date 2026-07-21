@@ -271,11 +271,22 @@ struct EditorView: View {
                                             scale: scale)
                         }
                 )
-                .onHover { inside in
-                    if inside {
-                        NSCursor.crosshair.push()
-                    } else {
-                        NSCursor.pop()
+                .onContinuousHover { phase in
+                    // Cursor tells the mode: arrow while typing (click
+                    // outside commits), I-beam for the Text tool, crosshair
+                    // for the drawing tools. The floating editor sits above
+                    // this layer, so AppKit shows its own I-beam there.
+                    switch phase {
+                    case .active:
+                        if model.editingTextID != nil {
+                            NSCursor.arrow.set()
+                        } else if model.tool == .text {
+                            NSCursor.iBeam.set()
+                        } else {
+                            NSCursor.crosshair.set()
+                        }
+                    case .ended:
+                        NSCursor.arrow.set()
                     }
                 }
 
@@ -293,23 +304,28 @@ struct EditorView: View {
 
     private func textEditor(annotation: Annotation, origin: CGPoint, scale: CGFloat) -> some View {
         let fontView = annotation.fontSize * model.displayScale * scale
-        return TextField("", text: $model.editingBuffer)
-            .textFieldStyle(.plain)
+        // Size the editor to its content (+ one glyph of caret room) — Enter
+        // adds lines, so both dimensions grow while typing. A wrap width
+        // (side handles) pins the width and the text re-flows inside.
+        let measured = model.textDisplaySize(model.editingBuffer + "M",
+                                             fontSize: annotation.fontSize,
+                                             wrapWidth: annotation.textWrapWidth)
+        return TextEditor(text: $model.editingBuffer)
             .font(.system(size: fontView, weight: .bold))
             .foregroundStyle(annotation.color)
+            .scrollContentBackground(.hidden)
+            .scrollDisabled(true)
+            .frame(width: measured.width * scale, height: measured.height * scale)
             .focused($textFieldFocused)
-            .onSubmit { model.commitTextEditing() }
             .onExitCommand { model.cancelTextEditing() }
-            .fixedSize()
-            .frame(minWidth: fontView * 0.6, alignment: .leading)
             .padding(3)
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
                     .stroke(Color.accentColor, lineWidth: 1.5)
             )
-            // -3 cancels the padding so glyphs land where the committed
-            // text will render.
-            .offset(x: origin.x * scale - 3, y: origin.y * scale - 3)
+            // -3 cancels the padding, -5 the NSTextView line-fragment inset,
+            // so glyphs land where the committed text will render.
+            .offset(x: origin.x * scale - 3 - 5, y: origin.y * scale - 3)
             .onAppear { textFieldFocused = true }
     }
 
@@ -354,17 +370,18 @@ struct EditorView: View {
                         .font(.system(size: d * 0.52, weight: .bold))
                         .foregroundColor(.white)
                     context.draw(text, at: vc)
-                case let .text(origin, string):
-                    // The one being typed is shown live by the TextField
+                case let .text(_, string):
+                    // The one being typed is shown live by the TextEditor
                     // overlay instead.
                     if model.editingTextID == annotation.id { break }
                     let fontView = annotation.fontSize * model.displayScale * scale
                     let text = Text(string)
                         .font(.system(size: fontView, weight: .bold))
                         .foregroundColor(annotation.color)
-                    context.draw(text,
-                                 at: CGPoint(x: origin.x * scale, y: origin.y * scale),
-                                 anchor: .topLeading)
+                    // draw(in:) wraps at the box width (side handles);
+                    // the rect comes from the same measurement as export.
+                    let vr = scaledRect(model.bounds(of: annotation), scale: scale)
+                    context.draw(text, in: vr)
                 }
             }
 
@@ -388,6 +405,15 @@ struct EditorView: View {
                 case .number:
                     handleCorners = []
                 case .text:
+                    // Side circles adjust the wrap width; drawn bigger than
+                    // corner squares, CleanShot-style.
+                    for p in [CGPoint(x: vr.minX, y: vr.midY),
+                              CGPoint(x: vr.maxX, y: vr.midY)] {
+                        let outer = CGRect(x: p.x - 7, y: p.y - 7, width: 14, height: 14)
+                        context.fill(Path(ellipseIn: outer), with: .color(.white))
+                        context.fill(Path(ellipseIn: outer.insetBy(dx: 2.5, dy: 2.5)),
+                                     with: .color(.accentColor))
+                    }
                     handleCorners = [CGPoint(x: vr.maxX, y: vr.maxY)]
                 default:
                     handleCorners = [CGPoint(x: vr.minX, y: vr.minY),
@@ -410,13 +436,20 @@ struct EditorView: View {
     /// without relying on `.onDeleteCommand` focus behavior.
     private var hiddenKeyButtons: some View {
         Group {
-            // Both go inert while typing — Delete must edit the text and
-            // Esc must reach the TextField's onExitCommand (cancel) instead.
+            // Delete goes inert while typing (backspace must edit the text).
+            // Esc stays live: while typing it cancels the session (backup to
+            // the editor's own onExitCommand — cancel is idempotent).
             Button("") { model.deleteSelected() }
                 .keyboardShortcut(model.editingTextID == nil
                                   ? KeyboardShortcut(.delete, modifiers: []) : nil)
-            Button("") { model.deselect() }
-                .keyboardShortcut(model.editingTextID == nil ? .cancelAction : nil)
+            Button("") {
+                if model.editingTextID != nil {
+                    model.cancelTextEditing()
+                } else {
+                    model.deselect()
+                }
+            }
+            .keyboardShortcut(.cancelAction)
         }
         .opacity(0)
         .frame(width: 0, height: 0)

@@ -39,13 +39,21 @@ CleanShot เพราะเราไม่มี word-wrap)
   hidden Delete/Esc buttons, และ ⌘Z/⌘C/⌘S — ให้ field editor จัดการเอง
   (ไม่งั้นพิมพ์ "b" แล้ว tool สลับ / ⌘C copy ภาพแทนข้อความ)
 
-**จบการพิมพ์:**
-- **Enter** = commit; ถ้า trim แล้วว่างเปล่า → ลบ annotation ทิ้ง + drop history
-  snapshot (ไม่เหลือขยะใน undo — pattern เดียวกับ click-select เดิม)
+**จบการพิมพ์:** (ปรับตาม feedback 2026-07-21: Enter ≠ commit)
+- **Enter** = ขึ้นบรรทัดใหม่ — ข้อความเป็น multi-line ได้ (ใช้ `TextEditor`)
+- **คลิกข้างนอกกรอบ** = commit (ทางหลักในการจบ); ถ้า trim แล้วว่างเปล่า →
+  ลบ annotation ทิ้ง + drop history snapshot (ไม่เหลือขยะใน undo)
+  แล้ว gesture นั้นทำงานตามปกติต่อ (ถ้ายังเป็น Text tool คลิกที่ว่าง =
+  เริ่มพิมพ์อันใหม่)
+- **สลับ tool ระหว่างพิมพ์** = commit เช่นกัน (กันหลุด session ค้าง)
 - **Esc** = ยกเลิก; อันที่เพิ่งสร้าง → ลบทิ้ง, อันเดิมที่ double-click มาแก้ →
   คืนข้อความ/สภาพเดิม (drop snapshot ทั้งคู่)
-- **คลิกที่อื่น** = commit อันเดิมก่อน แล้ว gesture นั้นทำงานตามปกติต่อ
-  (ถ้ายังเป็น Text tool คลิกที่ว่าง = เริ่มพิมพ์อันใหม่)
+
+**Cursor ตามโหมด:**
+- กำลังพิมพ์ + เมาส์นอกกรอบ text = ลูกศรปกติ (สื่อว่า "คลิกเพื่อออก")
+- Text tool ไม่ได้พิมพ์ = I-beam (พร้อมวางข้อความ), เหนือกรอบที่พิมพ์อยู่ =
+  I-beam ของ field เอง
+- Tool อื่น = crosshair (เหมือนเดิม)
 
 **แก้ไข:** double-click ที่ text annotation (tool ไหนก็ได้) → เข้าโหมดพิมพ์อีกครั้ง
 (pushHistory ก่อนแก้)
@@ -61,7 +69,8 @@ CleanShot เพราะเราไม่มี word-wrap)
 - ไม่มีวงกลมซ้าย/ขวาแบบ CleanShot (นั่นไว้ปรับความกว้าง word-wrap — เราเป็น
   single-line ยังไม่ทำ)
 
-**ข้อความ:** บรรทัดเดียว (Enter = commit) — multi-line เป็นงานอนาคต
+**ข้อความ:** หลายบรรทัดได้ (Enter = ขึ้นบรรทัดใหม่) — วัดขนาด/วาด/export ด้วย
+`boundingRect`/`draw(with:)` + `.usesLineFragmentOrigin` ทั้งสามทาง
 
 ## Size dropdown (toolbar)
 

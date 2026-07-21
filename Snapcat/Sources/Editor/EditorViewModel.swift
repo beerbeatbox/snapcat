@@ -17,7 +17,12 @@ final class EditorViewModel: ObservableObject {
     let displayScale: CGFloat
 
     // Published editor state.
-    @Published var tool: EditorTool = .rectangle
+    @Published var tool: EditorTool = .rectangle {
+        didSet {
+            // Switching tools mid-typing ends the session cleanly.
+            if oldValue != tool { commitTextEditing() }
+        }
+    }
     @Published var color: Color = .red {
         didSet {
             // Mid-edit swatch changes recolor the text being typed.
@@ -114,6 +119,14 @@ final class EditorViewModel: ObservableObject {
         case draw
         case move(id: UUID, original: Annotation)
         case resize(id: UUID, original: Annotation, corner: Corner)
+        case resizeTextWidth(id: UUID, original: Annotation, leftEdge: Bool)
+    }
+
+    /// What a handle hit resolves to: a rect corner (shapes; bottom-right on
+    /// text scales the font) or a text side-circle (wrap width).
+    private enum HandleTarget {
+        case corner(Corner)
+        case textEdge(left: Bool)
     }
 
     private var activeDrag: ActiveDrag?
@@ -129,33 +142,39 @@ final class EditorViewModel: ObservableObject {
     }
 
     /// If `point` (image px) falls in a handle hit zone of the SELECTED
-    /// rect-kind annotation, return the resize target. Handle zones are
-    /// circles of radius ~10 view points around the rect's actual corners.
-    private func handleHit(at point: CGPoint, scale: CGFloat) -> (id: UUID, original: Annotation, corner: Corner)? {
+    /// annotation, return the resize target. Handle zones are circles of
+    /// radius ~10 view points around the handle's actual position.
+    private func handleHit(at point: CGPoint, scale: CGFloat) -> (id: UUID, original: Annotation, target: HandleTarget)? {
         guard let selected = selectedID,
               let annotation = annotations.first(where: { $0.id == selected }) else { return nil }
+        func hits(_ p: CGPoint, radius: CGFloat) -> Bool {
+            let dx = point.x - p.x
+            let dy = point.y - p.y
+            return dx * dx + dy * dy <= radius * radius
+        }
         switch annotation.kind {
         case .number:
             return nil   // number badges stay move-only
         case .text:
-            // Text scales via a single bottom-right handle.
+            // Bottom-right square scales the font; side circles set the
+            // wrap width. Corner wins when the zones overlap (tiny text).
             let rect = bounds(of: annotation)
             let radius = 10 / scale
-            let p = cornerPoint(.bottomRight, of: rect)
-            let dx = point.x - p.x
-            let dy = point.y - p.y
-            if dx * dx + dy * dy <= radius * radius {
-                return (annotation.id, annotation, .bottomRight)
+            if hits(cornerPoint(.bottomRight, of: rect), radius: radius) {
+                return (annotation.id, annotation, .corner(.bottomRight))
+            }
+            if hits(CGPoint(x: rect.minX, y: rect.midY), radius: radius) {
+                return (annotation.id, annotation, .textEdge(left: true))
+            }
+            if hits(CGPoint(x: rect.maxX, y: rect.midY), radius: radius) {
+                return (annotation.id, annotation, .textEdge(left: false))
             }
             return nil
         case let .blur(rect), let .ellipse(rect), let .rectangle(rect):
             let radius = 10 / scale
             for corner in Corner.allCases {
-                let p = cornerPoint(corner, of: rect)
-                let dx = point.x - p.x
-                let dy = point.y - p.y
-                if dx * dx + dy * dy <= radius * radius {
-                    return (annotation.id, annotation, corner)
+                if hits(cornerPoint(corner, of: rect), radius: radius) {
+                    return (annotation.id, annotation, .corner(corner))
                 }
             }
             return nil
@@ -200,12 +219,19 @@ final class EditorViewModel: ObservableObject {
     }
 
     /// Rendered size of a text annotation's string in image pixels.
-    func textDisplaySize(_ string: String, fontSize: CGFloat) -> CGSize {
+    /// Multi-line aware (Enter inserts newlines); with `wrapWidth` the box
+    /// keeps that width and the text re-flows inside it (side handles).
+    func textDisplaySize(_ string: String, fontSize: CGFloat,
+                         wrapWidth: CGFloat? = nil) -> CGSize {
         let font = NSFont.boldSystemFont(ofSize: fontSize * displayScale)
-        let size = (string as NSString).size(withAttributes: [.font: font])
+        let attributed = NSAttributedString(string: string, attributes: [.font: font])
+        let constraint = CGSize(width: wrapWidth ?? CGFloat.greatestFiniteMagnitude,
+                                height: CGFloat.greatestFiniteMagnitude)
+        let rect = attributed.boundingRect(with: constraint,
+                                           options: [.usesLineFragmentOrigin])
         // Floors keep empty/short strings hittable and the edit frame visible.
-        return CGSize(width: max(size.width, fontSize * displayScale * 0.5),
-                      height: max(size.height, fontSize * displayScale * 1.1))
+        return CGSize(width: max(ceil(wrapWidth ?? rect.width), fontSize * displayScale * 0.5),
+                      height: max(ceil(rect.height), fontSize * displayScale * 1.1))
     }
 
     /// Bounding rect in image pixels for ANY kind — text needs measurement,
@@ -213,7 +239,8 @@ final class EditorViewModel: ObservableObject {
     func bounds(of annotation: Annotation) -> CGRect {
         if case let .text(origin, string) = annotation.kind {
             return CGRect(origin: origin,
-                          size: textDisplaySize(string, fontSize: annotation.fontSize))
+                          size: textDisplaySize(string, fontSize: annotation.fontSize,
+                                                wrapWidth: annotation.textWrapWidth))
         }
         return annotation.bounds(numberDiameter: numberDiameter)
     }
@@ -287,7 +314,12 @@ final class EditorViewModel: ObservableObject {
                 commitTextEditing()
             }
             if let hit = handleHit(at: start, scale: scale) {
-                activeDrag = .resize(id: hit.id, original: hit.original, corner: hit.corner)
+                switch hit.target {
+                case let .corner(corner):
+                    activeDrag = .resize(id: hit.id, original: hit.original, corner: corner)
+                case let .textEdge(left):
+                    activeDrag = .resizeTextWidth(id: hit.id, original: hit.original, leftEdge: left)
+                }
                 pushHistory()
             } else if let id = hitTest(start, scale: scale),
                       let original = annotations.first(where: { $0.id == id }) {
@@ -326,6 +358,10 @@ final class EditorViewModel: ObservableObject {
                     var copy = original
                     copy.fontSize = (original.fontSize * newDiagonal / originalDiagonal)
                         .clamped(to: 6...400)
+                    // The box scales as one unit — wrap width follows the
+                    // font (post-clamp ratio keeps them in sync at limits).
+                    let ratio = copy.fontSize / original.fontSize
+                    copy.textWrapWidth = original.textWrapWidth.map { $0 * ratio }
                     annotations[index] = copy
                 }
             } else {
@@ -340,6 +376,27 @@ final class EditorViewModel: ObservableObject {
                 if let index = annotations.firstIndex(where: { $0.id == id }) {
                     annotations[index] = original.withRect(normalizedRect(anchor, moved))
                 }
+            }
+        case let .resizeTextWidth(id, original, leftEdge):
+            // Side circles re-flow the text: the dragged edge follows the
+            // cursor, the opposite edge stays put. Width floor = one glyph.
+            let dx = (currentView.x - startView.x) / scale
+            let rect = bounds(of: original)
+            let minWidth = original.fontSize * displayScale
+            if let index = annotations.firstIndex(where: { $0.id == id }) {
+                var copy = original
+                if leftEdge {
+                    let width = max(rect.width - dx, minWidth)
+                    if case let .text(_, string) = original.kind {
+                        copy.kind = .text(origin: CGPoint(x: rect.maxX - width,
+                                                          y: rect.minY),
+                                          string: string)
+                    }
+                    copy.textWrapWidth = width
+                } else {
+                    copy.textWrapWidth = max(rect.width + dx, minWidth)
+                }
+                annotations[index] = copy
             }
         case .draw, nil:
             switch tool {
@@ -386,6 +443,19 @@ final class EditorViewModel: ObservableObject {
                    case .text = annotation.kind,
                    (NSApp.currentEvent?.clickCount ?? 0) >= 2 {
                     startEditing(id)
+                }
+            }
+        case let .resizeTextWidth(id, original, _):
+            // No-move click on a side circle: restore + drop the snapshot
+            // (same pattern as the corner-resize path below).
+            let dx = (currentView.x - startView.x) / scale
+            let dy = (currentView.y - startView.y) / scale
+            if (dx * dx + dy * dy).squareRoot() < 3 {
+                if let index = annotations.firstIndex(where: { $0.id == id }) {
+                    annotations[index] = original
+                }
+                if !history.isEmpty {
+                    history.removeLast()
                 }
             }
         case let .resize(id, original, _):
@@ -710,7 +780,14 @@ final class EditorViewModel: ObservableObject {
                         .font: font,
                         .foregroundColor: nsColor
                     ]
-                    (string as NSString).draw(at: origin, withAttributes: attributes)
+                    // draw(with:) + usesLineFragmentOrigin renders \n line
+                    // breaks; draw(at:) would put everything on one line.
+                    let size = self.textDisplaySize(string, fontSize: annotation.fontSize,
+                                                    wrapWidth: annotation.textWrapWidth)
+                    (string as NSString).draw(with: CGRect(origin: origin, size: size),
+                                              options: [.usesLineFragmentOrigin],
+                                              attributes: attributes,
+                                              context: nil)
                 }
             }
 
