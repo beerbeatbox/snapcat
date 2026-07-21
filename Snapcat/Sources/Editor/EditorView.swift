@@ -271,24 +271,12 @@ struct EditorView: View {
                                             scale: scale)
                         }
                 )
-                .onContinuousHover { phase in
-                    // Cursor tells the mode: arrow while typing (click
-                    // outside commits), I-beam for the Text tool, crosshair
-                    // for the drawing tools. The floating editor sits above
-                    // this layer, so AppKit shows its own I-beam there.
-                    switch phase {
-                    case .active:
-                        if model.editingTextID != nil {
-                            NSCursor.arrow.set()
-                        } else if model.tool == .text {
-                            NSCursor.iBeam.set()
-                        } else {
-                            NSCursor.crosshair.set()
-                        }
-                    case .ended:
-                        NSCursor.arrow.set()
-                    }
-                }
+            // 5.5 Cursor owner — a real AppKit tracking area. SwiftUI-level
+            //     NSCursor.set() calls lose to the focused text view's
+            //     cursor updates; this doesn't. Transparent to clicks.
+            CursorTrackingView { point in
+                model.cursor(atViewPoint: point, scale: scale)
+            }
 
             // 6. Inline text editor — floats exactly where the text renders.
             //    Must sit ABOVE the interaction layer to receive clicks/keys.
@@ -488,6 +476,54 @@ struct EditorView: View {
                y: rect.origin.y * scale,
                width: rect.width * scale,
                height: rect.height * scale)
+    }
+}
+
+/// Owns the canvas cursor via an AppKit tracking area. Sits above the
+/// interaction layer, below the floating text editor; passes clicks through
+/// (hitTest nil) — tracking-area events arrive regardless.
+private struct CursorTrackingView: NSViewRepresentable {
+    let cursorProvider: (CGPoint) -> NSCursor
+
+    func makeNSView(context: Context) -> TrackingNSView {
+        let view = TrackingNSView()
+        view.cursorProvider = cursorProvider
+        return view
+    }
+
+    func updateNSView(_ view: TrackingNSView, context: Context) {
+        view.cursorProvider = cursorProvider
+    }
+
+    final class TrackingNSView: NSView {
+        var cursorProvider: ((CGPoint) -> NSCursor)?
+
+        override var isFlipped: Bool { true }   // match SwiftUI's top-left space
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(
+                rect: .zero,
+                options: [.activeInKeyWindow, .mouseMoved,
+                          .mouseEnteredAndExited, .cursorUpdate, .inVisibleRect],
+                owner: self, userInfo: nil))
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func mouseMoved(with event: NSEvent) { apply(event) }
+        override func mouseEntered(with event: NSEvent) { apply(event) }
+        override func cursorUpdate(with event: NSEvent) { apply(event) }
+
+        override func mouseExited(with event: NSEvent) {
+            NSCursor.arrow.set()
+        }
+
+        private func apply(_ event: NSEvent) {
+            guard let provider = cursorProvider else { return }
+            provider(convert(event.locationInWindow, from: nil)).set()
+        }
     }
 }
 

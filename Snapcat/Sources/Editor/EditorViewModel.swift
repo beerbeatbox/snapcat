@@ -275,6 +275,54 @@ final class EditorViewModel: ObservableObject {
                       height: rect.height + 6 / scale)
     }
 
+    // MARK: - Cursor
+
+    /// One place decides the canvas cursor for every state. Served to the
+    /// AppKit tracking view that owns cursor updates over the canvas.
+    func cursor(atViewPoint viewPoint: CGPoint, scale: CGFloat) -> NSCursor {
+        let point = imagePoint(from: viewPoint, scale: scale)
+
+        func resizeCursor(for target: HandleTarget) -> NSCursor {
+            switch target {
+            case .textEdge:
+                return .resizeLeftRight
+            case let .corner(corner):
+                if #available(macOS 15.0, *) {
+                    let position: NSCursor.FrameResizePosition
+                    switch corner {
+                    case .topLeft:     position = .topLeft
+                    case .topRight:    position = .topRight
+                    case .bottomLeft:  position = .bottomLeft
+                    case .bottomRight: position = .bottomRight
+                    }
+                    return .frameResize(position: position, directions: .all)
+                }
+                return .crosshair
+            }
+        }
+
+        if let editingID = editingTextID {
+            if let hit = handleHit(at: point, scale: scale), hit.id == editingID {
+                return resizeCursor(for: hit.target)
+            }
+            // Over the floating editor its own I-beam applies — return the
+            // same so the two tracking systems never fight. Everywhere else
+            // the arrow reads "click to leave".
+            if let annotation = annotations.first(where: { $0.id == editingID }),
+               handleBox(of: annotation, scale: scale).contains(point) {
+                return .iBeam
+            }
+            return .arrow
+        }
+        if let hit = handleHit(at: point, scale: scale) {
+            return resizeCursor(for: hit.target)
+        }
+        if hitTest(point, scale: scale) != nil {
+            return .openHand   // grabbable object
+        }
+        return tool == .text ? .iBeam : .crosshair
+    }
+
     // MARK: - Interaction
 
     private func imagePoint(from viewPoint: CGPoint, scale: CGFloat) -> CGPoint {
