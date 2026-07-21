@@ -56,6 +56,10 @@ struct EditorView: View {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(model.tool == tool ? Color.accentColor : Color.clear)
                         )
+                        // Transparent regions aren't hittable — without this,
+                        // an unselected button's hit area shrinks to the bare
+                        // glyph (~20×10 of 34×26) and edge clicks fall through.
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("\(tool.label) (\(String(tool.shortcut.character)))")
