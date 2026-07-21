@@ -3,13 +3,28 @@
     <channel>
         <title>Snapcat</title>
         <item>
+            <title>0.2.1</title>
+            <pubDate>Wed, 22 Jul 2026 00:41:34 +0700</pubDate>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>0.2.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.1/Snapcat-0.2.1.zip" length="3077345" type="application/octet-stream" sparkle:edSignature="qO2gUA6oxrKIdfewf29aZvIJ4MR4h+z+MPMlLPwK8cELCbNj2h+1BDyxGfummcfy9fOhAE+TGfK04oJO/5dTAA=="/>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.1/Snapcat7-6.delta" sparkle:deltaFrom="6" length="34346" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="f06j9njW9xGXiyXZruATtzF9Fl+xQsGTOfadjJvXe1/VLM6hu8TKHIhxnfOFoEQDttWLp5UuN+73JaHWpVfdAA=="/>
+                <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.1/Snapcat7-5.delta" sparkle:deltaFrom="5" length="114226" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="cLFL9/xAt0ptSFUdEfrXx6XPXaFMPnwaklhCfV5rGRQA1/Qqlej9cr8XWAKcQbQtIP7g9OxAHti6BAp4OadaDw=="/>
+                <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.1/Snapcat7-4.delta" sparkle:deltaFrom="4" length="119414" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="gKYREE4kb5PVVz54t2Z2cO8OALaawfd9Ndb1MBcBKfd4JWaGbqUzXzw4OGp7YSsVy8gJPTFkHCNG6te3Ct7+Ag=="/>
+                <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.1/Snapcat7-3.delta" sparkle:deltaFrom="3" length="1603194" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="dz5EfbAiixktYsBwpbwzovFd5PpUuBQ7S0lXhUWRcwPfzHoUceritNCa+ySVa8bTSgQxH6s2rpNU1Xl4CILmDg=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>0.2.0</title>
             <pubDate>Wed, 22 Jul 2026 00:28:56 +0700</pubDate>
             <sparkle:version>6</sparkle:version>
             <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.0/Snapcat-0.2.0.zip" length="3076748" type="application/octet-stream" sparkle:edSignature="B5ezRGExqW7R2x9FXlAAhOzgEhyitZK5ePAVw4C2SL62YVKm0Co6EPz8r6ETlmWtEzJV1jQ2rNiD83LpDoQVBA=="/>
+            <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.1/Snapcat-0.2.0.zip" length="3076748" type="application/octet-stream" sparkle:edSignature="B5ezRGExqW7R2x9FXlAAhOzgEhyitZK5ePAVw4C2SL62YVKm0Co6EPz8r6ETlmWtEzJV1jQ2rNiD83LpDoQVBA=="/>
             <sparkle:deltas>
                 <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.0/Snapcat6-5.delta" sparkle:deltaFrom="5" length="114030" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="C0HGr9gctRh5Yb6SfQiASIc2PSgWEY+QESBaT0g9C0zM+1zaccmYso9VegZlsxZy0Idpj8ecnrjVZz4ys4iyCA=="/>
                 <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.0/Snapcat6-4.delta" sparkle:deltaFrom="4" length="118306" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="cH47WfYsjfBGMt3KAK0jfhuQfpmu9IJ8VaymUDvASNYyrgPBRVRBwEoOItA0CD25/7UJ4npHcc+OIukCl6l+Cg=="/>
@@ -23,22 +38,10 @@
             <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.0/Snapcat-0.1.2.zip" length="3028852" type="application/octet-stream" sparkle:edSignature="BVHD4cbHiEpYx0Fum+P5P7xqfAms8d7r8cfINqZXe56diukFfvA5UTcF7efqtfIfEhvYp6NobSSRJBS/9BWdBQ=="/>
+            <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.1/Snapcat-0.1.2.zip" length="3028852" type="application/octet-stream" sparkle:edSignature="BVHD4cbHiEpYx0Fum+P5P7xqfAms8d7r8cfINqZXe56diukFfvA5UTcF7efqtfIfEhvYp6NobSSRJBS/9BWdBQ=="/>
             <sparkle:deltas>
                 <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.1.2/Snapcat5-4.delta" sparkle:deltaFrom="4" length="34766" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="/K0uVeGXQ21dti2iTUFyGDFlnng3FbQkllJX741p53PV9YORHCaYEpRL8K2fh1xe8B0TLgRIl8LsUq0JN2DwAQ=="/>
                 <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.1.2/Snapcat5-3.delta" sparkle:deltaFrom="3" length="1521050" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="QINfCVI2YeRVXWOT/dC4qCeTt9XQEProJeTBSJED22+t9Vk/KpirTew+autOLdnJ1XVjKixC2GXhFm8peDLFAQ=="/>
-            </sparkle:deltas>
-        </item>
-        <item>
-            <title>0.1.1</title>
-            <pubDate>Sat, 04 Jul 2026 19:58:10 +0700</pubDate>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.2.0/Snapcat-0.1.1.zip" length="3028834" type="application/octet-stream" sparkle:edSignature="Ok9AZEU5lNmAAcYBaPHpjJ+v4b0b13FwGb8KeWk1swFTzThSzK3GxyHrtuy/3gm95v7+EOdT1VbUExkDNHFWBA=="/>
-            <sparkle:deltas>
-                <enclosure url="https://github.com/beerbeatbox/snapcat/releases/download/v0.1.1/Snapcat4-3.delta" sparkle:deltaFrom="3" length="1507778" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="DZJHxTVDXDXDxIMXtOO9hlKuWykpiHYfY3Lwgka9gUSUGkkZw1C9YW++ozS7pSuCvOOIg9sgoe5BJ0zuETx7Dg=="/>
             </sparkle:deltas>
         </item>
     </channel>
