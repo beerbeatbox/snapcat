@@ -22,6 +22,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         HotkeyManager.shared.onHotkey = { CaptureService.shared.captureArea() }
         HotkeyManager.shared.register()
+
+        // Debug hook: open the editor immediately with a fixed image so
+        // automation/dev runs can drive it without an interactive capture.
+        if let path = ProcessInfo.processInfo.environment["SNAPCAT_DEBUG_IMAGE"],
+           let image = NSImage(contentsOfFile: path) {
+            EditorWindowController.open(image: image)
+        }
     }
 
     // MARK: - Status bar
