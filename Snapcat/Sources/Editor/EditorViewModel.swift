@@ -370,6 +370,14 @@ final class EditorViewModel: ObservableObject {
                 activeDrag = .move(id: id, original: original)
                 selectedID = id
                 pushHistory()
+            } else if tool == .text, selectedID != nil {
+                // Text tool mirrors the typing flow here too: the first
+                // press outside a selected item only clears the selection —
+                // the NEXT click opens a new box. (Shape tools keep
+                // deselect-and-draw: their draws auto-select, so swallowing
+                // would force a dead click between consecutive shapes.)
+                selectedID = nil
+                activeDrag = .swallow
             } else {
                 activeDrag = .draw
                 selectedID = nil
