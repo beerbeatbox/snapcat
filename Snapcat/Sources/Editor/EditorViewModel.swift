@@ -11,14 +11,31 @@ final class EditorViewModel: ObservableObject {
     let pixelSize: CGSize
     let baseNSImage: NSImage
 
+    /// Pixels per logical point of the source image. screencapture embeds
+    /// DPI metadata, so NSImage.size is in points while cgImage is pixels
+    /// (2 on Retina). Font pt → image px = pt × displayScale.
+    let displayScale: CGFloat
+
     // Published editor state.
     @Published var tool: EditorTool = .rectangle
-    @Published var color: Color = .red
+    @Published var color: Color = .red {
+        didSet {
+            // Mid-edit swatch changes recolor the text being typed.
+            guard let id = editingTextID,
+                  let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+            annotations[index].color = color
+        }
+    }
     @Published var annotations: [Annotation] = []
     @Published var draft: Annotation?
     @Published var justCopied: Bool = false
     @Published var selectedID: UUID?
     @Published var blurLevel: Int = 3   // tool default, applied to new blur regions
+    @Published var textFontSize: CGFloat = 30   // tool default, pt
+    @Published var editingTextID: UUID?
+    @Published var editingBuffer: String = ""
+    /// Pre-edit copy when re-editing an existing text; nil for newly created.
+    private var editingOriginal: Annotation?
 
     private var justCopiedWorkItem: DispatchWorkItem?
 
@@ -120,6 +137,17 @@ final class EditorViewModel: ObservableObject {
         switch annotation.kind {
         case .number:
             return nil   // number badges stay move-only
+        case .text:
+            // Text scales via a single bottom-right handle.
+            let rect = bounds(of: annotation)
+            let radius = 10 / scale
+            let p = cornerPoint(.bottomRight, of: rect)
+            let dx = point.x - p.x
+            let dy = point.y - p.y
+            if dx * dx + dy * dy <= radius * radius {
+                return (annotation.id, annotation, .bottomRight)
+            }
+            return nil
         case let .blur(rect), let .ellipse(rect), let .rectangle(rect):
             let radius = 10 / scale
             for corner in Corner.allCases {
@@ -146,6 +174,10 @@ final class EditorViewModel: ObservableObject {
         self.pixelSize = size
         self.baseNSImage = NSImage(cgImage: cg, size: size)
 
+        let logicalWidth = image.size.width
+        let ratio = logicalWidth > 0 ? size.width / logicalWidth : 1
+        self.displayScale = (ratio.isFinite && ratio > 0) ? ratio : 1
+
         // Warm the cache for the default level so first paint is instant.
         _ = blurredNSImage(level: 3)
     }
@@ -165,6 +197,25 @@ final class EditorViewModel: ObservableObject {
 
     var numberDiameter: CGFloat {
         max(32, pixelSize.width * 0.028)
+    }
+
+    /// Rendered size of a text annotation's string in image pixels.
+    func textDisplaySize(_ string: String, fontSize: CGFloat) -> CGSize {
+        let font = NSFont.boldSystemFont(ofSize: fontSize * displayScale)
+        let size = (string as NSString).size(withAttributes: [.font: font])
+        // Floors keep empty/short strings hittable and the edit frame visible.
+        return CGSize(width: max(size.width, fontSize * displayScale * 0.5),
+                      height: max(size.height, fontSize * displayScale * 1.1))
+    }
+
+    /// Bounding rect in image pixels for ANY kind — text needs measurement,
+    /// so callers should prefer this over Annotation.bounds(numberDiameter:).
+    func bounds(of annotation: Annotation) -> CGRect {
+        if case let .text(origin, string) = annotation.kind {
+            return CGRect(origin: origin,
+                          size: textDisplaySize(string, fontSize: annotation.fontSize))
+        }
+        return annotation.bounds(numberDiameter: numberDiameter)
     }
 
     // MARK: - Interaction
@@ -212,6 +263,11 @@ final class EditorViewModel: ObservableObject {
                 if !inner.contains(point) {
                     return annotation.id
                 }
+            case .text:
+                // Text reads as a solid block — the whole measured rect hits.
+                if bounds(of: annotation).insetBy(dx: -tol, dy: -tol).contains(point) {
+                    return annotation.id
+                }
             }
         }
         return nil
@@ -225,6 +281,11 @@ final class EditorViewModel: ObservableObject {
         // Handle check comes BEFORE hitTest so a handle overlapping another
         // object still wins (and only the selected annotation has handles).
         if activeDrag == nil {
+            // A click outside the floating TextField ends the typing session
+            // first — and must, so a just-emptied annotation can't be hit.
+            if editingTextID != nil {
+                commitTextEditing()
+            }
             if let hit = handleHit(at: start, scale: scale) {
                 activeDrag = .resize(id: hit.id, original: hit.original, corner: hit.corner)
                 pushHistory()
@@ -249,18 +310,36 @@ final class EditorViewModel: ObservableObject {
                 annotations[index] = original.moved(by: delta)
             }
         case let .resize(id, original, corner):
-            // Dragged corner follows the cursor (unclamped); the OPPOSITE
-            // corner of the ORIGINAL rect is the fixed anchor. Re-normalizing
-            // every tick lets the rect flip naturally past the anchor.
             let delta = CGVector(dx: (currentView.x - startView.x) / scale,
                                  dy: (currentView.y - startView.y) / scale)
-            let rect = original.bounds(numberDiameter: numberDiameter)
-            let movingCorner = cornerPoint(corner, of: rect)
-            let moved = CGPoint(x: movingCorner.x + delta.dx,
-                                y: movingCorner.y + delta.dy)
-            let anchor = cornerPoint(corner.opposite, of: rect)
-            if let index = annotations.firstIndex(where: { $0.id == id }) {
-                annotations[index] = original.withRect(normalizedRect(anchor, moved))
+            if case let .text(origin, _) = original.kind {
+                // Single bottom-right handle: font size follows the ratio of
+                // the dragged diagonal (origin → cursor) to the original one.
+                let rect = bounds(of: original)
+                let dragged = CGPoint(x: rect.maxX + delta.dx,
+                                      y: rect.maxY + delta.dy)
+                let originalDiagonal = hypot(rect.width, rect.height)
+                guard originalDiagonal > 0 else { break }
+                let newDiagonal = hypot(max(dragged.x - origin.x, 0),
+                                        max(dragged.y - origin.y, 0))
+                if let index = annotations.firstIndex(where: { $0.id == id }) {
+                    var copy = original
+                    copy.fontSize = (original.fontSize * newDiagonal / originalDiagonal)
+                        .clamped(to: 6...400)
+                    annotations[index] = copy
+                }
+            } else {
+                // Dragged corner follows the cursor (unclamped); the OPPOSITE
+                // corner of the ORIGINAL rect is the fixed anchor. Re-normalizing
+                // every tick lets the rect flip naturally past the anchor.
+                let rect = bounds(of: original)
+                let movingCorner = cornerPoint(corner, of: rect)
+                let moved = CGPoint(x: movingCorner.x + delta.dx,
+                                    y: movingCorner.y + delta.dy)
+                let anchor = cornerPoint(corner.opposite, of: rect)
+                if let index = annotations.firstIndex(where: { $0.id == id }) {
+                    annotations[index] = original.withRect(normalizedRect(anchor, moved))
+                }
             }
         case .draw, nil:
             switch tool {
@@ -273,6 +352,8 @@ final class EditorViewModel: ObservableObject {
             case .blur:
                 draft = Annotation(kind: .blur(normalizedRect(start, current)), color: color,
                                    blurLevel: blurLevel)
+            case .text:
+                break   // click-to-place; no drag preview
             }
         }
     }
@@ -299,13 +380,20 @@ final class EditorViewModel: ObservableObject {
                 if !history.isEmpty {
                     history.removeLast()
                 }
+                // Double-click on a text opens the inline editor (AppKit
+                // still knows the click count during a SwiftUI DragGesture).
+                if let annotation = annotations.first(where: { $0.id == id }),
+                   case .text = annotation.kind,
+                   (NSApp.currentEvent?.clickCount ?? 0) >= 2 {
+                    startEditing(id)
+                }
             }
         case let .resize(id, original, _):
             let dx = (currentView.x - startView.x) / scale
             let dy = (currentView.y - startView.y) / scale
             let distance = (dx * dx + dy * dy).squareRoot()
-            let finalRect = annotations.first(where: { $0.id == id })?
-                .bounds(numberDiameter: numberDiameter)
+            let finalRect = annotations.first(where: { $0.id == id })
+                .map { bounds(of: $0) }
             let tooSmall = finalRect.map { $0.width < 3 || $0.height < 3 } ?? true
             if distance < 3 || tooSmall {
                 // Degenerate resize or no-move click on a handle: restore the
@@ -350,6 +438,10 @@ final class EditorViewModel: ObservableObject {
                     annotations.append(annotation)
                     selectedID = annotation.id
                 }
+            case .text:
+                // Click OR long drag both place a new text at the gesture's
+                // start point (no drag-to-size — text has no word wrap).
+                startNewText(at: start)
             }
         }
     }
@@ -380,6 +472,108 @@ final class EditorViewModel: ObservableObject {
         } else {
             blurLevel = level
         }
+    }
+
+    // MARK: - Text editing
+
+    /// The selected annotation's id, but only if it's a text.
+    var selectedTextID: UUID? {
+        guard let selected = selectedID,
+              let annotation = annotations.first(where: { $0.id == selected }),
+              case .text = annotation.kind else { return nil }
+        return selected
+    }
+
+    /// Begin typing a brand-new text at `point` (image px).
+    /// One history snapshot; commitTextEditing drops it if nothing was typed.
+    func startNewText(at point: CGPoint) {
+        commitTextEditing()
+        pushHistory()
+        var annotation = Annotation(kind: .text(origin: point, string: ""), color: color)
+        annotation.fontSize = textFontSize
+        annotations.append(annotation)
+        selectedID = annotation.id
+        editingTextID = annotation.id
+        editingBuffer = ""
+        editingOriginal = nil
+    }
+
+    /// Re-open an existing text annotation for editing (double-click).
+    func startEditing(_ id: UUID) {
+        commitTextEditing()
+        guard let annotation = annotations.first(where: { $0.id == id }),
+              case let .text(_, string) = annotation.kind else { return }
+        pushHistory()
+        editingOriginal = annotation
+        editingTextID = id
+        editingBuffer = string
+        selectedID = id
+    }
+
+    /// Commit the buffer into the annotation. Empty (after trimming) means
+    /// the user typed nothing worth keeping: remove the annotation and drop
+    /// the session's snapshot so ⌘Z stays meaningful. An unchanged re-edit
+    /// also drops its snapshot (same click-select pattern as dragEnded).
+    func commitTextEditing() {
+        guard let id = editingTextID else { return }
+        defer {
+            editingTextID = nil
+            editingBuffer = ""
+            editingOriginal = nil
+        }
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = editingBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            annotations.remove(at: index)
+            if selectedID == id { selectedID = nil }
+            if !history.isEmpty { history.removeLast() }
+            return
+        }
+        if case let .text(origin, _) = annotations[index].kind {
+            annotations[index].kind = .text(origin: origin, string: editingBuffer)
+        }
+        if let original = editingOriginal,
+           case let .text(_, originalString) = original.kind,
+           originalString == editingBuffer,
+           original.color == annotations[index].color,
+           original.fontSize == annotations[index].fontSize,
+           !history.isEmpty {
+            history.removeLast()
+        }
+    }
+
+    /// Abort the session (Esc): new text vanishes, re-edited text reverts.
+    func cancelTextEditing() {
+        guard let id = editingTextID else { return }
+        defer {
+            editingTextID = nil
+            editingBuffer = ""
+            editingOriginal = nil
+        }
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        if let original = editingOriginal {
+            annotations[index] = original
+        } else {
+            annotations.remove(at: index)
+            if selectedID == id { selectedID = nil }
+        }
+        if !history.isEmpty { history.removeLast() }
+    }
+
+    /// Dropdown setter. Applies to the text being edited/selected (one undo
+    /// snapshot when it's a committed one) and always becomes the new tool
+    /// default, so the next text starts at the last-used size.
+    func setTextFontSize(_ size: CGFloat) {
+        let clamped = size.clamped(to: 6...400)
+        textFontSize = clamped
+        guard let id = editingTextID ?? selectedTextID,
+              let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        // Mid-edit changes ride the editing session's snapshot; cancel must
+        // restore the pre-edit size too, so don't push a second one.
+        if editingTextID == nil {
+            pushHistory()
+        }
+        annotations[index].fontSize = clamped
     }
 
     func deleteSelected() {
@@ -510,6 +704,13 @@ final class EditorViewModel: ObservableObject {
                     path.stroke()
                 case let .number(center, value):
                     self.drawNumber(value, at: center, color: nsColor)
+                case let .text(origin, string):
+                    let font = NSFont.boldSystemFont(ofSize: annotation.fontSize * self.displayScale)
+                    let attributes: [NSAttributedString.Key: Any] = [
+                        .font: font,
+                        .foregroundColor: nsColor
+                    ]
+                    (string as NSString).draw(at: origin, withAttributes: attributes)
                 }
             }
 
@@ -555,6 +756,9 @@ final class EditorViewModel: ObservableObject {
     // MARK: - Actions
 
     func copyResult() {
+        // The toolbar stays clickable while typing — the pasteboard must
+        // contain the committed text, not a half-open editing session.
+        commitTextEditing()
         CaptureService.copyToClipboard(renderFinal())
         justCopied = true
         justCopiedWorkItem?.cancel()
@@ -566,6 +770,7 @@ final class EditorViewModel: ObservableObject {
     }
 
     func saveResult() {
+        commitTextEditing()
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.canCreateDirectories = true

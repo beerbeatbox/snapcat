@@ -3,10 +3,13 @@ import AppKit
 
 struct EditorView: View {
     @ObservedObject var model: EditorViewModel
+    @FocusState private var textFieldFocused: Bool
 
     private let presetColors: [Color] = [
         .red, .orange, .yellow, .green, .blue, .purple, .white, .black
     ]
+
+    private let fontSizePresets: [CGFloat] = [10, 13, 16, 20, 24, 30, 36, 48, 72, 96]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,6 +30,9 @@ struct EditorView: View {
             colorGroup
             if model.tool == .blur || model.selectedBlurID != nil {
                 blurLevelGroup
+            }
+            if model.tool == .text || model.selectedTextID != nil || model.editingTextID != nil {
+                textSizeGroup
             }
             Spacer()
             trailingActions
@@ -53,7 +59,9 @@ struct EditorView: View {
                 }
                 .buttonStyle(.plain)
                 .help("\(tool.label) (\(String(tool.shortcut.character)))")
-                .keyboardShortcut(tool.shortcut, modifiers: [])
+                .keyboardShortcut(model.editingTextID == nil
+                                  ? KeyboardShortcut(tool.shortcut, modifiers: [])
+                                  : nil)
             }
         }
         .padding(2)
@@ -127,6 +135,33 @@ struct EditorView: View {
         .help("Blur strength")
     }
 
+    // MARK: - Text size dropdown
+
+    /// Size of the text being edited/selected when there is one (live
+    /// editing), otherwise the tool default. Handle-dragged values may land
+    /// off-preset — the label shows the real value, e.g. "43 pt".
+    private var currentFontSize: CGFloat {
+        if let id = model.editingTextID ?? model.selectedTextID,
+           let annotation = model.annotations.first(where: { $0.id == id }) {
+            return annotation.fontSize
+        }
+        return model.textFontSize
+    }
+
+    private var textSizeGroup: some View {
+        Menu {
+            ForEach(fontSizePresets, id: \.self) { size in
+                Button("\(Int(size)) pt") { model.setTextFontSize(size) }
+            }
+        } label: {
+            Text("\(Int(currentFontSize.rounded())) pt")
+                .font(.system(size: 12, weight: .medium))
+                .monospacedDigit()
+        }
+        .fixedSize()
+        .help("Text size")
+    }
+
     private var trailingActions: some View {
         HStack(spacing: 10) {
             if model.justCopied {
@@ -146,7 +181,8 @@ struct EditorView: View {
                     .frame(width: 20, height: 15)
             }
             .help("Undo (⌘Z)")
-            .keyboardShortcut("z", modifiers: [.command])
+            .keyboardShortcut(model.editingTextID == nil
+                              ? KeyboardShortcut("z", modifiers: [.command]) : nil)
             .disabled(!model.canUndo)
 
             Button {
@@ -157,7 +193,8 @@ struct EditorView: View {
                     .frame(width: 20, height: 15)
             }
             .help("Save (⌘S)")
-            .keyboardShortcut("s", modifiers: [.command])
+            .keyboardShortcut(model.editingTextID == nil
+                              ? KeyboardShortcut("s", modifiers: [.command]) : nil)
 
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -168,7 +205,8 @@ struct EditorView: View {
             }
             .buttonStyle(.borderedProminent)
             .help("Copy (⌘C)")
-            .keyboardShortcut("c", modifiers: [.command])
+            .keyboardShortcut(model.editingTextID == nil
+                              ? KeyboardShortcut("c", modifiers: [.command]) : nil)
         }
     }
 
@@ -240,7 +278,39 @@ struct EditorView: View {
                         NSCursor.pop()
                     }
                 }
+
+            // 6. Inline text editor — floats exactly where the text renders.
+            //    Must sit ABOVE the interaction layer to receive clicks/keys.
+            if let editingID = model.editingTextID,
+               let annotation = model.annotations.first(where: { $0.id == editingID }),
+               case let .text(origin, _) = annotation.kind {
+                textEditor(annotation: annotation, origin: origin, scale: scale)
+            }
         }
+    }
+
+    // MARK: - Inline text editor
+
+    private func textEditor(annotation: Annotation, origin: CGPoint, scale: CGFloat) -> some View {
+        let fontView = annotation.fontSize * model.displayScale * scale
+        return TextField("", text: $model.editingBuffer)
+            .textFieldStyle(.plain)
+            .font(.system(size: fontView, weight: .bold))
+            .foregroundStyle(annotation.color)
+            .focused($textFieldFocused)
+            .onSubmit { model.commitTextEditing() }
+            .onExitCommand { model.cancelTextEditing() }
+            .fixedSize()
+            .frame(minWidth: fontView * 0.6, alignment: .leading)
+            .padding(3)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.accentColor, lineWidth: 1.5)
+            )
+            // -3 cancels the padding so glyphs land where the committed
+            // text will render.
+            .offset(x: origin.x * scale - 3, y: origin.y * scale - 3)
+            .onAppear { textFieldFocused = true }
     }
 
     private func annotationCanvas(scale: CGFloat) -> some View {
@@ -284,33 +354,53 @@ struct EditorView: View {
                         .font(.system(size: d * 0.52, weight: .bold))
                         .foregroundColor(.white)
                     context.draw(text, at: vc)
+                case let .text(origin, string):
+                    // The one being typed is shown live by the TextField
+                    // overlay instead.
+                    if model.editingTextID == annotation.id { break }
+                    let fontView = annotation.fontSize * model.displayScale * scale
+                    let text = Text(string)
+                        .font(.system(size: fontView, weight: .bold))
+                        .foregroundColor(annotation.color)
+                    context.draw(text,
+                                 at: CGPoint(x: origin.x * scale, y: origin.y * scale),
+                                 anchor: .topLeading)
                 }
             }
 
             // Selection indicator — drawn after all annotations so it sits
-            // on top. View-only; never rendered into the export.
+            // on top. View-only; never rendered into the export. Hidden for
+            // the annotation being typed (the TextField draws its own border).
             if let selectedID = model.selectedID,
+               selectedID != model.editingTextID,
                let selected = model.annotations.first(where: { $0.id == selectedID }) {
-                let bounds = selected.bounds(numberDiameter: model.numberDiameter)
+                let bounds = model.bounds(of: selected)
                 let vr = scaledRect(bounds, scale: scale).insetBy(dx: -6, dy: -6)
                 context.stroke(Path(roundedRect: vr, cornerRadius: 4),
                                with: .color(.accentColor),
                                style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
 
-                // Corner resize handles — rect kinds only; numbers stay
-                // move-only. Drawn on top of the dashed indicator.
-                if case .number = selected.kind {} else {
-                    let corners = [CGPoint(x: vr.minX, y: vr.minY),
-                                   CGPoint(x: vr.maxX, y: vr.minY),
-                                   CGPoint(x: vr.minX, y: vr.maxY),
-                                   CGPoint(x: vr.maxX, y: vr.maxY)]
-                    for corner in corners {
-                        let handleRect = CGRect(x: corner.x - 3.5, y: corner.y - 3.5,
-                                                width: 7, height: 7)
-                        context.fill(Path(handleRect), with: .color(.white))
-                        context.stroke(Path(handleRect), with: .color(.accentColor),
-                                       lineWidth: 1)
-                    }
+                // Resize handles, drawn on top of the dashed indicator.
+                // Numbers stay move-only; text gets a single bottom-right
+                // handle that scales the font; rect kinds keep all corners.
+                let handleCorners: [CGPoint]
+                switch selected.kind {
+                case .number:
+                    handleCorners = []
+                case .text:
+                    handleCorners = [CGPoint(x: vr.maxX, y: vr.maxY)]
+                default:
+                    handleCorners = [CGPoint(x: vr.minX, y: vr.minY),
+                                     CGPoint(x: vr.maxX, y: vr.minY),
+                                     CGPoint(x: vr.minX, y: vr.maxY),
+                                     CGPoint(x: vr.maxX, y: vr.maxY)]
+                }
+                for corner in handleCorners {
+                    let handleRect = CGRect(x: corner.x - 3.5, y: corner.y - 3.5,
+                                            width: 7, height: 7)
+                    context.fill(Path(handleRect), with: .color(.white))
+                    context.stroke(Path(handleRect), with: .color(.accentColor),
+                                   lineWidth: 1)
                 }
             }
         }
@@ -320,10 +410,13 @@ struct EditorView: View {
     /// without relying on `.onDeleteCommand` focus behavior.
     private var hiddenKeyButtons: some View {
         Group {
+            // Both go inert while typing — Delete must edit the text and
+            // Esc must reach the TextField's onExitCommand (cancel) instead.
             Button("") { model.deleteSelected() }
-                .keyboardShortcut(.delete, modifiers: [])
+                .keyboardShortcut(model.editingTextID == nil
+                                  ? KeyboardShortcut(.delete, modifiers: []) : nil)
             Button("") { model.deselect() }
-                .keyboardShortcut(.cancelAction)
+                .keyboardShortcut(model.editingTextID == nil ? .cancelAction : nil)
         }
         .opacity(0)
         .frame(width: 0, height: 0)
