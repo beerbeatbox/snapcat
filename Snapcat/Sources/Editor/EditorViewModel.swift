@@ -352,9 +352,11 @@ final class EditorViewModel: ObservableObject {
                     }
                 } else {
                     // Any other press just ends the session and is consumed
-                    // whole — no new box, no select-through. The next click
-                    // acts normally.
+                    // whole — no new box, no select-through, and no lingering
+                    // selection either, so the NEXT click starts a fresh box
+                    // (typing → click → click = new box, always two presses).
                     commitTextEditing()
+                    selectedID = nil
                     activeDrag = .swallow
                 }
             } else if let hit = handleHit(at: start, scale: scale) {
