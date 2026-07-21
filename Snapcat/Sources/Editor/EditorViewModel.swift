@@ -120,6 +120,9 @@ final class EditorViewModel: ObservableObject {
         case move(id: UUID, original: Annotation)
         case resize(id: UUID, original: Annotation, corner: Corner)
         case resizeTextWidth(id: UUID, original: Annotation, leftEdge: Bool)
+        /// The press that ended a typing session — consumed whole: no draw,
+        /// no select. The user clicks again to start the next thing.
+        case swallow
     }
 
     /// What a handle hit resolves to: a rect corner (shapes; bottom-right on
@@ -245,6 +248,21 @@ final class EditorViewModel: ObservableObject {
         return annotation.bounds(numberDiameter: numberDiameter)
     }
 
+    /// Bounds as currently SHOWN: while a text is being typed, the live
+    /// buffer (plus caret room, matching the floating editor's frame) drives
+    /// the size — the committed string is stale until commit. Handles are
+    /// drawn and hit-tested against this so visuals and grabs agree.
+    func displayBounds(of annotation: Annotation) -> CGRect {
+        guard annotation.id == editingTextID,
+              case let .text(origin, _) = annotation.kind else {
+            return bounds(of: annotation)
+        }
+        return CGRect(origin: origin,
+                      size: textDisplaySize(editingBuffer + "M",
+                                            fontSize: annotation.fontSize,
+                                            wrapWidth: annotation.textWrapWidth))
+    }
+
     // MARK: - Interaction
 
     private func imagePoint(from viewPoint: CGPoint, scale: CGFloat) -> CGPoint {
@@ -308,12 +326,26 @@ final class EditorViewModel: ObservableObject {
         // Handle check comes BEFORE hitTest so a handle overlapping another
         // object still wins (and only the selected annotation has handles).
         if activeDrag == nil {
-            // A click outside the floating TextField ends the typing session
-            // first — and must, so a just-emptied annotation can't be hit.
             if editingTextID != nil {
-                commitTextEditing()
-            }
-            if let hit = handleHit(at: start, scale: scale) {
+                // Handles stay live while typing — grabbing one resizes
+                // without ending the session (no extra snapshot either:
+                // mid-edit changes ride the session's snapshot, so Esc
+                // still reverts everything in one go).
+                if let hit = handleHit(at: start, scale: scale), hit.id == editingTextID {
+                    switch hit.target {
+                    case let .corner(corner):
+                        activeDrag = .resize(id: hit.id, original: hit.original, corner: corner)
+                    case let .textEdge(left):
+                        activeDrag = .resizeTextWidth(id: hit.id, original: hit.original, leftEdge: left)
+                    }
+                } else {
+                    // Any other press just ends the session and is consumed
+                    // whole — no new box, no select-through. The next click
+                    // acts normally.
+                    commitTextEditing()
+                    activeDrag = .swallow
+                }
+            } else if let hit = handleHit(at: start, scale: scale) {
                 switch hit.target {
                 case let .corner(corner):
                     activeDrag = .resize(id: hit.id, original: hit.original, corner: corner)
@@ -347,7 +379,7 @@ final class EditorViewModel: ObservableObject {
             if case let .text(origin, _) = original.kind {
                 // Single bottom-right handle: font size follows the ratio of
                 // the dragged diagonal (origin → cursor) to the original one.
-                let rect = bounds(of: original)
+                let rect = displayBounds(of: original)
                 let dragged = CGPoint(x: rect.maxX + delta.dx,
                                       y: rect.maxY + delta.dy)
                 let originalDiagonal = hypot(rect.width, rect.height)
@@ -381,7 +413,7 @@ final class EditorViewModel: ObservableObject {
             // Side circles re-flow the text: the dragged edge follows the
             // cursor, the opposite edge stays put. Width floor = one glyph.
             let dx = (currentView.x - startView.x) / scale
-            let rect = bounds(of: original)
+            let rect = displayBounds(of: original)
             let minWidth = original.fontSize * displayScale
             if let index = annotations.firstIndex(where: { $0.id == id }) {
                 var copy = original
@@ -398,6 +430,8 @@ final class EditorViewModel: ObservableObject {
                 }
                 annotations[index] = copy
             }
+        case .swallow:
+            break
         case .draw, nil:
             switch tool {
             case .number:
@@ -445,16 +479,19 @@ final class EditorViewModel: ObservableObject {
                     startEditing(id)
                 }
             }
+        case .swallow:
+            break
         case let .resizeTextWidth(id, original, _):
             // No-move click on a side circle: restore + drop the snapshot
-            // (same pattern as the corner-resize path below).
+            // (same pattern as the corner-resize path below). Mid-edit drags
+            // never pushed one — the session snapshot must survive.
             let dx = (currentView.x - startView.x) / scale
             let dy = (currentView.y - startView.y) / scale
             if (dx * dx + dy * dy).squareRoot() < 3 {
                 if let index = annotations.firstIndex(where: { $0.id == id }) {
                     annotations[index] = original
                 }
-                if !history.isEmpty {
+                if !history.isEmpty, editingTextID == nil {
                     history.removeLast()
                 }
             }
@@ -468,11 +505,12 @@ final class EditorViewModel: ObservableObject {
             if distance < 3 || tooSmall {
                 // Degenerate resize or no-move click on a handle: restore the
                 // original and drop this gesture's snapshot (same pattern as
-                // click-select). Selection is kept in all cases.
+                // click-select). Selection is kept in all cases. Mid-edit
+                // drags never pushed — keep the session snapshot intact.
                 if let index = annotations.firstIndex(where: { $0.id == id }) {
                     annotations[index] = original
                 }
-                if !history.isEmpty {
+                if !history.isEmpty, editingTextID == nil {
                     history.removeLast()
                 }
             }

@@ -386,16 +386,20 @@ struct EditorView: View {
             }
 
             // Selection indicator — drawn after all annotations so it sits
-            // on top. View-only; never rendered into the export. Hidden for
-            // the annotation being typed (the TextField draws its own border).
+            // on top. View-only; never rendered into the export. While a
+            // text is being typed the handles still show (so its abilities
+            // stay discoverable) but the dashed rect is skipped — the
+            // floating editor draws its own border.
             if let selectedID = model.selectedID,
-               selectedID != model.editingTextID,
                let selected = model.annotations.first(where: { $0.id == selectedID }) {
-                let bounds = model.bounds(of: selected)
+                let editing = selectedID == model.editingTextID
+                let bounds = model.displayBounds(of: selected)
                 let vr = scaledRect(bounds, scale: scale).insetBy(dx: -6, dy: -6)
-                context.stroke(Path(roundedRect: vr, cornerRadius: 4),
-                               with: .color(.accentColor),
-                               style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                if !editing {
+                    context.stroke(Path(roundedRect: vr, cornerRadius: 4),
+                                   with: .color(.accentColor),
+                                   style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                }
 
                 // Resize handles, drawn on top of the dashed indicator.
                 // Numbers stay move-only; text gets a single bottom-right
